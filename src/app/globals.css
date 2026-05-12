@@ -42,3 +42,17 @@
 .bg-neon-green {
   background-color: #00FF85;
 }
+
+@keyframes float {
+  0% {
+    transform: translateY(120vh) rotate(0deg) scale(0.8);
+  }
+  100% {
+    transform: translateY(-100px) rotate(720deg) scale(1.1);
+  }
+}
+
+.animate-float {
+  animation: float 45s linear infinite;
+  will-change: transform;
+}
