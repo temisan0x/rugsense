@@ -6,12 +6,13 @@ import {
   calculateTop10Ownership,
 } from "@/lib/birdeye";
 import { getCache, setCache } from "@/lib/cache";
+import { checkRateLimit } from "@/lib/ratelimit";
 
 const KNOWN_TOKENS: Record<string, { name: string; symbol: string; liquidity: number; v24hUSD: number }> = {
   'DezXAZ8z7PnrnRJjz3wXBoRgixCa6D4t7YaB1pPB263': { name: 'Bonk',        symbol: 'BONK', liquidity: 4_100_000,  v24hUSD: 16_500_000 },
   '85VBFQZC9TZkfaptBWjvUw7YbZjy52A6mjtPGjstQAmQ': { name: 'dogwifhat',   symbol: 'WIF',  liquidity: 9_200_000,  v24hUSD: 38_000_000 },
   'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN':  { name: 'Jupiter',     symbol: 'JUP',  liquidity: 12_000_000, v24hUSD: 51_000_000 },
-  'A3eME5CetyZPBoWbRUwY3tSe25S6tb18ba9ZPbWk9eFJ': { name: 'Pepe Solana', symbol: 'PEPE', liquidity: 8_200, v24hUSD: 2_800_000 },
+  'A3eME5CetyZPBoWbRUwY3tSe25S6tb18ba9ZPbWk9eFJ': { name: 'Pepe Solana', symbol: 'PEPE', liquidity: 8_200,      v24hUSD: 2_800_000  },
 }
 
 export async function GET(req: NextRequest) {
@@ -25,6 +26,16 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? '127.0.0.1'
+    const { allowed, remaining } = checkRateLimit(ip)
+    if (!allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please wait a minute before scanning again.' },
+        { status: 429, headers: { 'Retry-After': '60' } }
+      )
+    }
+    console.log(`[scan] ip=${ip} remaining=${remaining}`)
+
     const cacheKey = `scan:${address}`;
     const cached = getCache<object>(cacheKey);
     if (cached) {
@@ -32,7 +43,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ...cached, cached: true });
     }
 
-    // ── Step 1: token overview
     let overview: any = {};
     try {
       const res = await getTokenOverview(address);
@@ -47,7 +57,6 @@ export async function GET(req: NextRequest) {
       .map(([k]) => k);
     console.log("[scan] non-null overview fields:", realFields.join(", "));
 
-    // ── Step 2: holders (non-fatal)
     let holdersRaw: any[] = [];
     try {
       const holdersRes = await getTopHolders(address);
@@ -61,9 +70,7 @@ export async function GET(req: NextRequest) {
       console.log("[scan] first holder sample:", JSON.stringify(holdersRaw[0]));
     }
 
-    // ── Step 3: merge live data with fallback
     const fallback = KNOWN_TOKENS[address]
-
     const liquidity  = overview?.liquidity  || fallback?.liquidity  || 0
     const volume24h  = overview?.v24hUSD    || fallback?.v24hUSD    || 0
     const name       = overview?.name       || fallback?.name       || 'Unknown Token'
